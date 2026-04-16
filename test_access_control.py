@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Automated verification and regression tests for SDN access-control policy."""
+"""Policy-matrix verification and regression tests for SDN access control."""
 
 import sys
 import time
@@ -23,30 +23,51 @@ class AccessControlTopology(Topo):
             self.addLink(host, switch)
 
 
-def ping_once(src, dst):
+AUTHORIZED = {"10.0.0.1", "10.0.0.3"}
+
+
+def run_ping(src, dst):
     output = src.cmd("ping -c 2 -W 1 {}".format(dst.IP()))
-    return "0% packet loss" in output or "1% packet loss" in output
+    packet_loss = "100% packet loss" in output
+    return not packet_loss
 
 
-def run_case(hosts, src_name, dst_name, expected):
-    src = hosts[src_name]
-    dst = hosts[dst_name]
-    actual = ping_once(src, dst)
+def expected_policy(src, dst):
+    return src.IP() in AUTHORIZED and dst.IP() in AUTHORIZED
+
+
+def validate_case(src, dst):
+    expected = expected_policy(src, dst)
+    actual = run_ping(src, dst)
     status = "PASS" if actual == expected else "FAIL"
-    expectation = "ALLOW" if expected else "DENY"
-    print("[{}] {} -> {} expected={} actual={}".format(
+    print("[{}] {}({}) -> {}({}) expected={} actual={}".format(
         status,
-        src_name,
-        dst_name,
-        expectation,
+        src.name,
+        src.IP(),
+        dst.name,
+        dst.IP(),
+        "ALLOW" if expected else "DENY",
         "ALLOW" if actual else "DENY",
     ))
     return actual == expected
 
 
-def check_deny_flow_installed(switch):
+def check_rule_installation(switch):
     flows = switch.cmd("ovs-ofctl dump-flows s1")
-    return "priority=200" in flows
+    has_deny = "priority=200" in flows
+    has_allow = "priority=100" in flows
+    return has_allow and has_deny
+
+
+def run_policy_matrix(hosts):
+    host_list = [hosts["h1"], hosts["h2"], hosts["h3"], hosts["h4"]]
+    results = []
+    for src in host_list:
+        for dst in host_list:
+            if src == dst:
+                continue
+            results.append(validate_case(src, dst))
+    return results
 
 
 def main():
@@ -70,24 +91,17 @@ def main():
     }
     switch = net.get("s1")
 
-    base_cases = [
-        ("h1", "h2", True),
-        ("h2", "h3", True),
-        ("h3", "h1", True),
-        ("h4", "h1", False),
-        ("h4", "h2", False),
-        ("h4", "h3", False),
-    ]
+    print("=== Verification: Full Host-Pair Policy Matrix ===")
+    results = run_policy_matrix(hosts)
 
-    print("=== Verification Tests ===")
-    results = [run_case(hosts, src, dst, expected) for src, dst, expected in base_cases]
+    print("\n=== Regression: Re-run Full Matrix ===")
+    results.extend(run_policy_matrix(hosts))
 
-    print("\n=== Regression Tests (repeat policy checks) ===")
-    results.extend(run_case(hosts, src, dst, expected) for src, dst, expected in base_cases)
-
-    deny_flow_ok = check_deny_flow_installed(switch)
-    print("\n[{}] deny flow rule installed (priority=200)".format("PASS" if deny_flow_ok else "FAIL"))
-    results.append(deny_flow_ok)
+    flow_rules_ok = check_rule_installation(switch)
+    print("\n[{}] flow rules include both allow(priority=100) and deny(priority=200)".format(
+        "PASS" if flow_rules_ok else "FAIL"
+    ))
+    results.append(flow_rules_ok)
 
     passed = sum(1 for item in results if item)
     total = len(results)

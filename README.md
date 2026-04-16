@@ -73,8 +73,9 @@ sudo python3 topology.py
 In Mininet CLI, verify behavior:
 
 ```bash
-h1 ping -c 2 h2
 h2 ping -c 2 h3
+h1 ping -c 2 h3
+h1 ping -c 2 h2
 h4 ping -c 2 h1
 h4 ping -c 2 h2
 sh ovs-ofctl dump-flows s1
@@ -82,7 +83,8 @@ sh ovs-ofctl dump-flows s1
 
 Expected:
 
-- pings between h1/h2/h3 should work.
+- pings between h1 and h3 should work.
+- pings involving h2 or h4 as source should fail.
 - pings from h4 should fail.
 - flow table should show deny entries with `priority=200`.
 
@@ -96,10 +98,9 @@ sudo python3 test_access_control.py
 
 The script validates:
 
-1. Authorized host communication is allowed.
-2. Unauthorized host traffic is denied.
-3. Same checks repeated for regression consistency.
-4. Deny flow rule exists in switch flow table.
+1. Full host-pair policy matrix against expected allow/deny outcomes.
+2. Same full matrix rerun for regression consistency.
+3. Both allow and deny flow rules are installed.
 
 Exit status:
 
@@ -114,8 +115,7 @@ Edit `policy.json`:
 {
   "authorized_hosts": [
        "10.0.0.1",
-       "10.0.0.2",
-       "10.0.0.3"
+                   "10.0.0.3"
   ]
 }
 ```
