@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Policy-matrix verification and regression tests for SDN access control."""
 
+import json
+import os
 import sys
 import time
 
@@ -23,7 +25,27 @@ class AccessControlTopology(Topo):
             self.addLink(host, switch)
 
 
-AUTHORIZED = {"10.0.0.1", "10.0.0.3"}
+def load_policy(policy_path="policy.json"):
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    resolved_path = policy_path
+    if not os.path.isabs(policy_path):
+        resolved_path = os.path.join(current_dir, policy_path)
+
+    with open(resolved_path, "r") as policy_file:
+        payload = json.load(policy_file)
+
+    mode = payload.get("policy_mode", "strict")
+    authorized = set(payload.get("authorized_hosts", []))
+    allowed_pairs = {
+        (pair[0], pair[1])
+        for pair in payload.get("allowed_pairs", [])
+        if isinstance(pair, list) and len(pair) == 2
+    }
+    return {
+        "mode": mode,
+        "authorized": authorized,
+        "pairs": allowed_pairs,
+    }
 
 
 def run_ping(src, dst):
@@ -32,12 +54,14 @@ def run_ping(src, dst):
     return not packet_loss
 
 
-def expected_policy(src, dst):
-    return src.IP() in AUTHORIZED and dst.IP() in AUTHORIZED
+def expected_policy(src, dst, policy):
+    if policy["mode"] == "pair":
+        return (src.IP(), dst.IP()) in policy["pairs"]
+    return src.IP() in policy["authorized"] and dst.IP() in policy["authorized"]
 
 
-def validate_case(src, dst):
-    expected = expected_policy(src, dst)
+def validate_case(src, dst, policy):
+    expected = expected_policy(src, dst, policy)
     actual = run_ping(src, dst)
     status = "PASS" if actual == expected else "FAIL"
     print("[{}] {}({}) -> {}({}) expected={} actual={}".format(
@@ -59,19 +83,25 @@ def check_rule_installation(switch):
     return has_allow and has_deny
 
 
-def run_policy_matrix(hosts):
+def run_policy_matrix(hosts, policy):
     host_list = [hosts["h1"], hosts["h2"], hosts["h3"], hosts["h4"]]
     results = []
     for src in host_list:
         for dst in host_list:
             if src == dst:
                 continue
-            results.append(validate_case(src, dst))
+            results.append(validate_case(src, dst, policy))
     return results
 
 
 def main():
     setLogLevel("warning")
+    policy = load_policy()
+
+    print("Loaded policy mode: {}".format(policy["mode"]))
+    print("Authorized hosts: {}".format(sorted(policy["authorized"])))
+    if policy["pairs"]:
+        print("Allowed pairs: {}".format(sorted(policy["pairs"])))
 
     net = Mininet(
         topo=AccessControlTopology(),
@@ -92,10 +122,10 @@ def main():
     switch = net.get("s1")
 
     print("=== Verification: Full Host-Pair Policy Matrix ===")
-    results = run_policy_matrix(hosts)
+    results = run_policy_matrix(hosts, policy)
 
     print("\n=== Regression: Re-run Full Matrix ===")
-    results.extend(run_policy_matrix(hosts))
+    results.extend(run_policy_matrix(hosts, policy))
 
     flow_rules_ok = check_rule_installation(switch)
     print("\n[{}] flow rules include both allow(priority=100) and deny(priority=200)".format(

@@ -17,6 +17,14 @@ This implementation directly addresses the required submission points:
 5. Regression test (policy consistency):
       `test_access_control.py` repeats all policy test cases to ensure consistent behavior.
 
+## Design Notes
+
+- Policy is externalized in `policy.json` to separate configuration from controller logic.
+- `policy_mode` supports:
+      - `strict`: both source and destination must be in `authorized_hosts`
+      - `pair`: traffic must match explicit `allowed_pairs`
+- The current configuration uses `pair` mode to demonstrate fine-grained access control.
+
 ## Files
 
 - `controller.py`: POX module that enforces the whitelist policy.
@@ -83,9 +91,8 @@ sh ovs-ofctl dump-flows s1
 
 Expected:
 
-- pings between h1 and h3 should work.
+- h1 -> h3 and h3 -> h1 should work.
 - pings involving h2 or h4 as source should fail.
-- pings from h4 should fail.
 - flow table should show deny entries with `priority=200`.
 
 ## Automated Tests
@@ -101,6 +108,7 @@ The script validates:
 1. Full host-pair policy matrix against expected allow/deny outcomes.
 2. Same full matrix rerun for regression consistency.
 3. Both allow and deny flow rules are installed.
+4. Expected outcomes are loaded from `policy.json` (no hardcoded test policy).
 
 Exit status:
 
@@ -113,9 +121,14 @@ Edit `policy.json`:
 
 ```json
 {
+      "policy_mode": "pair",
   "authorized_hosts": [
-       "10.0.0.1",
-                   "10.0.0.3"
+            "10.0.0.1",
+            "10.0.0.3"
+      ],
+      "allowed_pairs": [
+            ["10.0.0.1", "10.0.0.3"],
+            ["10.0.0.3", "10.0.0.1"]
   ]
 }
 ```
