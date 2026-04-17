@@ -142,6 +142,9 @@ class AccessControlController(object):
         flow.hard_timeout = 300
         flow.match.dl_type = 0x0800
         flow.match.nw_src = ip_packet.srcip
+        # Use src+dst deny match so one denied destination does not block all
+        # future traffic from the same source host in pair-based policies.
+        flow.match.nw_dst = ip_packet.dstip
         event.connection.send(flow)
 
     def _forward_packet(self, event, packet):
